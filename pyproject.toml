@@ -1,0 +1,44 @@
+
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "picoflow"
+version = "0.1.1"
+description = "Simple, flexible AI agent framework with a small DSL and explicit state"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [
+    { name = "PicoFlow Contributors" }
+]
+requires-python = ">=3.8"
+
+dependencies = [
+]
+
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Software Development :: Libraries",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+[project.urls]
+Homepage = "https://github.com/the-picoflow/picoflow"
+Repository = "https://github.com/the-picoflow/picoflow"
+Issues = "https://github.com/the-picoflow/picoflow/issues"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["picoflow*"]
+

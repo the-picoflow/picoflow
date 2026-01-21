@@ -1,0 +1,4 @@
+.idea
+picoflow/__pycache__
+picoflow/adapters/__pycache__
+.DS_Store
