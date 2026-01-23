@@ -2,3 +2,5 @@
 picoflow/__pycache__
 picoflow/adapters/__pycache__
 .DS_Store
+dist
+picoflow.egg-info

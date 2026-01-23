@@ -211,7 +211,52 @@ state.tools["search"]
 ```
 
 ---
+## 📚 Cookbook (Examples)
 
+The `cookbook/` directory contains small, focused examples for common
+patterns.\
+Each folder is runnable and demonstrates one specific feature or usage
+style.
+
+    cookbook/
+    ├─ minimal-demo        # Smallest runnable PicoFlow example
+    ├─ multiple-crew       # Multi-agent / crew-style collaboration
+    ├─ simple-chat         # Basic chat agent
+    ├─ simple-chat-stream  # Streaming responses from LLM
+    ├─ simple-tool         # Tool calling and tool state
+    └─ trace               # Tracing and execution visualization
+
+### How to run
+
+All examples are standalone scripts:
+
+``` bash
+export OPENAI_API_KEY=sk-...
+cd cookbook/simple-chat
+python main.py
+```
+
+### When to use which example
+
+-   **Start here** → `minimal-demo`\
+    Understand Flow, DSL (`>>`), and Agent execution.
+
+-   **LLM interaction** → `simple-chat`, `simple-chat-stream`\
+    Prompt → response, with and without streaming.
+
+-   **Tool calling** → `simple-tool`\
+    How tools are defined, executed, and stored in `state.tools`.
+
+-   **Multi-step / multi-agent** → `multiple-crew`\
+    Composition of multiple flows and roles.
+
+-   **Debugging & observability** → `trace`\
+    How tracing hooks and structured events work.
+
+> Cookbook examples are intentionally small and close to real usage.\
+> They are recommended as the primary learning path after reading the
+> Minimal Example.
+---
 ## License
 
 MIT
