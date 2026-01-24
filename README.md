@@ -1,6 +1,11 @@
 <p align="center">
   <img src="picoflow/assets/picoflow_logo.png" width="280">
 </p>
+<p align="center">
+  <img src="https://img.shields.io/pypi/dm/picoflow">  <img src="https://img.shields.io/pypi/l/picoflow">
+</p>
+
+
 
 # PicoFlow — Simple, Flexible AI Agent Framework
 
