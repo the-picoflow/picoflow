@@ -19,7 +19,7 @@ LLMs, tools, loops, and branches compose naturally.**
 ```python
 from picoflow import flow, llm, create_agent
 
-LLM_URL = "llm+openai://api.openai.com/v1/chat/completions?model=gpt-4.1-mini&api_key_env=OPENAI_API_KEY"
+LLM_URL = "llm+openai://api.openai.com/v1/chat/completions?model=gpt-4.1-mini&api_key_env=OPENAI_API_KEY&insecure=1"
 
 @flow
 async def mem(ctx):
@@ -144,7 +144,7 @@ from picoflow.adapters.registry import from_url
 
 adapter = from_url(
     "llm+openai://api.openai.com/v1/chat/completions"
-    "?model=gpt-4.1-mini&api_key_env=OPENAI_API_KEY"
+    "?model=gpt-4.1-mini&api_key_env=OPENAI_API_KEY&insecure=1"
 )
 ```
 
@@ -214,6 +214,34 @@ Results:
 ```python
 state.tools["search"]
 ```
+
+## Troubleshooting: SSL certificate verify failed
+
+**Recommended (secure):** set your CA bundle
+
+``` bash
+export SSL_CERT_FILE=/path/to/ca.pem
+# or
+export PICO_CA_FILE=/path/to/ca.pem
+```
+
+**Quick debug (insecure):** disable verification temporarily
+
+``` text
+...&insecure=1
+```
+
+or
+
+``` bash
+export PICO_SSL_VERIFY=0
+```
+
+**Do not use this in production.**
+
+Note: Local Ollama usage (`llm+ollama://localhost:11434/...`) uses plain
+HTTP and does not require SSL configuration.
+
 
 ---
 ## 📚 Cookbook (Examples)

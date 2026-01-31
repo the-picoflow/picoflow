@@ -11,6 +11,7 @@ from typing import Any, Dict, Optional, AsyncGenerator
 from .types import LLMAdapter
 from .registry import register_llm_provider
 from ._http import run_blocking, raise_http_error, raise_url_error
+from ._http import TLSConfig, urlopen_with_tls
 
 
 def _maybe_float(v: Optional[str]) -> Optional[float]:
@@ -31,6 +32,33 @@ def _maybe_int(v: Optional[str]) -> Optional[int]:
         raise ValueError(f"Invalid int: {v}")
 
 
+def _is_local_host(host: str) -> bool:
+    return host in ("localhost", "127.0.0.1", "0.0.0.0") or host.startswith("127.")
+
+
+def _default_scheme(host: str) -> str:
+    # HTTPS by default, HTTP only for local dev.
+    return "http" if _is_local_host(host) else "https"
+
+
+# Provider-specific defaults.
+# Key: host suffix match
+# Value: default base_path
+_PROVIDER_BASE_PATH = {
+    # Volcengine Ark (Doubao)
+    "volces.com": "/api/v3",
+    "volcengineapi.com": "/api/v3",
+    "bytepluses.com": "/api/v3",
+}
+
+
+def _default_base_path(host: str) -> str:
+    for suffix, path in _PROVIDER_BASE_PATH.items():
+        if host.endswith(suffix):
+            return path
+    return "/v1"
+
+
 def openai_compat_factory(u: urllib.parse.ParseResult, qs: Dict[str, str]) -> LLMAdapter:
     model = (u.path or "").lstrip("/")
     if not model:
@@ -42,15 +70,15 @@ def openai_compat_factory(u: urllib.parse.ParseResult, qs: Dict[str, str]) -> LL
         base = base_url.rstrip("/")
     else:
         if host:
-            # default scheme http for local, https for api.openai.com
             if host == "api.openai.com":
                 base = "https://api.openai.com"
             else:
-                base = f"http://{host}"
+                scheme = _default_scheme(host)
+                base = f"{scheme}://{host}"
         else:
             base = "https://api.openai.com"
 
-    base_path = qs.get("base_path", "/v1").rstrip("/")
+    base_path = qs.get("base_path", _default_base_path(host)).rstrip("/")
     endpoint = f"{base}{base_path}/chat/completions"
 
     api_key = qs.get("api_key")
@@ -65,6 +93,24 @@ def openai_compat_factory(u: urllib.parse.ParseResult, qs: Dict[str, str]) -> LL
     top_p = _maybe_float(qs.get("top_p"))
     max_tokens = _maybe_int(qs.get("max_tokens"))
     timeout = _maybe_float(qs.get("timeout"))
+
+    # TLS options from DSN ---
+    # verify: default True. insecure=1 is shorthand for verify=False.
+    verify_q = (qs.get("verify") or "").strip().lower()
+    insecure_q = (qs.get("insecure") or "").strip().lower()
+
+    verify = True
+    if verify_q in ("0", "false", "no", "off"):
+        verify = False
+    if insecure_q in ("1", "true", "yes", "on"):
+        verify = False
+
+    tls = TLSConfig(
+        verify=verify,
+        ca_file=qs.get("ca_file") or None,
+        ca_path=qs.get("ca_path") or None,
+    )
+
 
     def _headers() -> Dict[str, str]:
         h = {"Content-Type": "application/json"}
@@ -91,7 +137,7 @@ def openai_compat_factory(u: urllib.parse.ParseResult, qs: Dict[str, str]) -> LL
             data = json.dumps(payload).encode("utf-8")
             req = urllib.request.Request(endpoint, data=data, headers=_headers(), method="POST")
             try:
-                with urllib.request.urlopen(req, timeout=timeout) as resp:
+                with urlopen_with_tls(req, timeout=timeout, tls=tls) as resp:
                     raw = resp.read().decode("utf-8")
                     return json.loads(raw)
             except urllib.error.HTTPError as e:
@@ -113,7 +159,7 @@ def openai_compat_factory(u: urllib.parse.ParseResult, qs: Dict[str, str]) -> LL
         def _open():
             data = json.dumps(payload).encode("utf-8")
             req = urllib.request.Request(endpoint, data=data, headers=_headers(), method="POST")
-            return urllib.request.urlopen(req, timeout=timeout)
+            return urlopen_with_tls(req, timeout=timeout, tls=tls)
 
         # ---- open connection (already handled) ----
         try:

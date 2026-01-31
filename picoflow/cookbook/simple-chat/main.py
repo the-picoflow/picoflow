@@ -4,7 +4,7 @@ from picoflow import flow, Flow, State
 from picoflow.adapters import from_url
 
 DSN = os.environ.get("LLM_DSN",
-                     "llm+openai://api.siliconflow.cn/deepseek-ai/DeepSeek-R1-0528-Qwen3-8B?api_key_env=OPENAI_API_KEY")
+                     "llm+openai://ark.cn-beijing.volces.com/doubao-seed-1-8-251228?api_key_env=OPENAI_API_KEY&insecure=1")
 llm_adapter = from_url(DSN)
 
 
