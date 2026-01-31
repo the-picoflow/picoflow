@@ -330,7 +330,7 @@ def llm(
         return state.update(
             output=output,
             memory=state.add_memory("assistant", output).memory,
-            done=True,
+            done=final,
             stop_reason="final" if final else None,
         )
 
