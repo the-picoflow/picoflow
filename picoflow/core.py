@@ -59,6 +59,10 @@ class Flow:
         return repeat(self)
 
 
+class MergeFlow(Flow):
+    pass
+
+
 def flow(fn: Callable[["State"], Union["State", Awaitable["State"]]]) -> Flow:
     @wraps(fn)
     def wrapped(state: State):
@@ -93,6 +97,7 @@ class State:
         # copy-on-write: keep "logical immutability"
         return replace(self, data={**self.data, **kv})
 
+
 Ctx = State
 
 
@@ -104,7 +109,7 @@ def pipe(*flows: Flow) -> Flow:
             if current.done:
                 return current
 
-            if current.branches is not None:
+            if current.branches is not None and not isinstance(f, MergeFlow):
                 raise RuntimeError(
                     "Encountered branches without merge; "
                     "please add merge() before continuing pipeline."
@@ -126,7 +131,8 @@ def fork(*flows: Flow) -> Flow:
     async def run(state: State) -> State:
         async def one(i: int, f: Flow) -> State:
             child = state.update(metadata={**state.metadata, "fork_id": i})
-            return await f.acall(child)
+            out = await f.acall(child)
+            return out.update(done=False, stop_reason=None)
 
         branches = await asyncio.gather(*(one(i, f) for i, f in enumerate(flows)))
         return state.update(branches=list(branches))
@@ -199,7 +205,7 @@ def merge(
 
         return merged.update(branches=None)
 
-    return Flow(run, name=f"merge:{mode.name.lower()}")
+    return MergeFlow(run, name=f"merge:{mode.name.lower()}")
 
 
 def tool(name: str, fn: Callable[[Any], Any]) -> Flow:
@@ -444,6 +450,7 @@ def repeat(step: Flow, until: Optional[Callable[["State"], bool]] = None) -> Flo
                 if until(ctx):
                     return ctx
             ctx = await step.acall(ctx)
+
     return Flow(run, name=f"repeat({step.name})")
 
 
