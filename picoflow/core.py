@@ -1,13 +1,25 @@
 from dataclasses import dataclass, replace, field
 from functools import wraps
 from typing import Callable, Optional, Dict, Any, List, Union, Generator, Awaitable, AsyncGenerator, AsyncIterator, \
-    Iterator
+    Iterator, Mapping
 from enum import Enum, auto
 import time
 import inspect
 import asyncio
 from .adapters.types import LLMAdapter
 from .adapters.registry import from_url
+
+
+@dataclass(frozen=True)
+class ToolCall:
+    name: str
+    arguments: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class LLMResult:
+    output: str = ""
+    tool_calls: List[ToolCall] = field(default_factory=list)
 
 
 class TraceEvent(str, Enum):
@@ -83,6 +95,7 @@ class State:
     done: bool = False
     stop_reason: Optional[str] = None
     branches: Optional[List["State"]] = None
+    tool_calls: Optional[List[ToolCall]] = None
 
     def update(self, **kwargs) -> "State":
         return replace(self, **kwargs)
@@ -221,6 +234,74 @@ def tool(name: str, fn: Callable[[Any], Any]) -> Flow:
     return Flow(run, name=f"tool:{name}")
 
 
+def call_tools(
+        tools: Mapping[str, Callable[..., Any]],
+        *,
+        result_prefix: str = "TOOL_RESULT",
+        error_prefix: str = "TOOL_ERROR",
+) -> Flow:
+    async def run(state: State) -> State:
+        calls = state.tool_calls or []
+        if not calls:
+            return state
+
+        # Execute tool calls in order (deterministic)
+        for c in calls:
+            fn = tools.get(c.name)
+            if fn is None:
+                state = state.add_memory("tool", f"{error_prefix}: {c.name}: tool not found")
+                continue
+
+            try:
+                r = fn(**(c.arguments or {}))
+                if inspect.isawaitable(r):
+                    r = await r
+                state = state.add_memory("tool", f"{result_prefix}: {c.name}: {r}")
+            except Exception as e:
+                state = state.add_memory("tool", f"{error_prefix}: {c.name}: {str(e)}")
+
+        # Clear tool calls after execution
+        return state.update(tool_calls=None, done=False, stop_reason=None)
+
+    return Flow(run, name="call_tools")
+
+
+def tool_loop(
+        planner: Flow,
+        tools: Mapping[str, Callable[..., Any]],
+        *,
+        max_steps: int = 8,
+        final_on_max_steps: bool = True,
+) -> Flow:
+    exec_tools = call_tools(tools)
+
+    async def run(state: State) -> State:
+        current = state
+
+        for step in range(max_steps):
+            check_timeout(current)
+            if current.done:
+                return current
+
+            current = await planner.acall(current)
+            check_timeout(current)
+
+            # No tool calls => planner produced final (or intermediate) text
+            if not current.tool_calls:
+                return current
+
+            # Execute tool calls and continue the loop
+            current = await exec_tools.acall(current)
+            check_timeout(current)
+
+        # Max steps reached
+        if final_on_max_steps:
+            return current.update(done=True, stop_reason="max_steps")
+        return current
+
+    return Flow(run, name=f"tool_loop({planner.name})")
+
+
 def llm(
         prompt_template: str = "{input}",
         stream: bool = False,
@@ -301,6 +382,7 @@ def llm(
             prompt = prompt + evidence_block
 
         # -------- streaming mode --------
+        tool_calls = None
         if stream:
             cb = state.metadata.get("stream_callback")
             if cb is None:
@@ -324,20 +406,33 @@ def llm(
             result = adapter(prompt, False)
 
             if inspect.isawaitable(result):
-                output = await result  # type: ignore[misc]
+                result = await result  # type: ignore[misc]
+
+            tool_calls = None
+
+            if isinstance(result, LLMResult):
+                output = result.output
+                tool_calls = result.tool_calls
             else:
-                output = result  # type: ignore[assignment]
+                output = result
 
             if not isinstance(output, str):
                 raise TypeError(
-                    f"llm(stream=False) adapter must return str or Awaitable[str], got {type(output).__name__}"
+                    f"llm(stream=False) adapter must return str/LLMResult (or Awaitable[...] ), got {type(result).__name__}"
                 )
+
+        has_tool_calls = bool(tool_calls)
+
+        new_memory = state.memory
+        if output:
+            new_memory = state.add_memory("assistant", output).memory
 
         return state.update(
             output=output,
-            memory=state.add_memory("assistant", output).memory,
-            done=final,
-            stop_reason="final" if final else None,
+            tool_calls=tool_calls if has_tool_calls else None,
+            memory=new_memory,
+            done=False if has_tool_calls else final,
+            stop_reason=None if has_tool_calls else ("final" if final else None),
         )
 
     return Flow(run, name="llm")
