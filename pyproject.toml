@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "picoflow"
-version = "0.1.6"
+version = "0.1.7"
 description = "Simple, flexible AI agent framework with a small DSL and explicit state"
 readme = "README.md"
 license = { text = "MIT" }

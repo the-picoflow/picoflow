@@ -127,7 +127,7 @@ def pipe(*flows: Flow) -> Flow:
             if current.done:
                 if current.stop_reason == "final" and i < n:
                     warnings.warn(
-                        f"Early final detected before step {i+1}/{n} "
+                        f"Early final detected before step {i + 1}/{n} "
                         f"('{getattr(f, 'name', 'unknown')}'). "
                         f"'final' is reserved for the last step of a pipeline. "
                         f"If this is intentional, use a different stop_reason "
@@ -151,7 +151,7 @@ def pipe(*flows: Flow) -> Flow:
                 if current.stop_reason == "final" and i < n - 1:
                     next_step = flows[i + 1]
                     warnings.warn(
-                        f"Early final detected at step {i+1}/{n} "
+                        f"Early final detected at step {i + 1}/{n} "
                         f"('{getattr(f, 'name', 'unknown')}'), "
                         f"but remaining steps exist (next: '{getattr(next_step, 'name', 'unknown')}'). "
                         f"'final' is reserved for the last step of a pipeline. "
@@ -166,7 +166,6 @@ def pipe(*flows: Flow) -> Flow:
 
     run.__flows__ = flows
     return Flow(run, name="pipe")
-
 
 
 def fork(*flows: Flow) -> Flow:
@@ -269,28 +268,79 @@ def call_tools(
         result_prefix: str = "TOOL_RESULT",
         error_prefix: str = "TOOL_ERROR",
 ) -> Flow:
+    """
+    Execute tool calls from state.tool_calls.
+
+    Contract change (intentional, simple, consistent):
+      - state.tools[tool_name] ALWAYS stores a list of results.
+      - Each tool call appends one item to that list.
+
+    If a tool returns {"raw": ..., "text": ...} (recommended for MCP):
+      - memory stores only "text"
+      - tools list stores the full dict (so raw is accessible)
+    """
+
+    def _as_text(r: Any) -> str:
+        # Prefer text view for {"raw","text"} dicts.
+        if isinstance(r, dict) and "text" in r and "raw" in r:
+            try:
+                return str(r.get("text", ""))
+            except Exception:
+                return ""
+        return str(r)
+
+    def _append_tool_result(tool_map: Dict[str, Any], name: str, value: Any) -> Dict[str, Any]:
+        """
+        Ensure tool_map[name] is always a list, then append.
+        If existing value is not a list (legacy), convert to list.
+        """
+        if name not in tool_map:
+            tool_map[name] = []
+        elif not isinstance(tool_map[name], list):
+            tool_map[name] = [tool_map[name]]
+        tool_map[name].append(value)
+        return tool_map
+
     async def run(state: State) -> State:
         calls = state.tool_calls or []
         if not calls:
             return state
 
-        # Execute tool calls in order (deterministic)
+        current = state
+
         for c in calls:
             fn = tools.get(c.name)
             if fn is None:
-                state = state.add_memory("tool", f"{error_prefix}: {c.name}: tool not found")
+                # memory: LLM-friendly
+                current = current.add_memory("tool", f"{error_prefix}: {c.name}: tool not found")
+
+                # tools: keep structured error, always list
+                new_tools = dict(current.tools)
+                _append_tool_result(new_tools, c.name, {"error": "tool not found"})
+                current = current.update(tools=new_tools)
                 continue
 
             try:
                 r = fn(**(c.arguments or {}))
                 if inspect.isawaitable(r):
                     r = await r
-                state = state.add_memory("tool", f"{result_prefix}: {c.name}: {r}")
-            except Exception as e:
-                state = state.add_memory("tool", f"{error_prefix}: {c.name}: {str(e)}")
 
-        # Clear tool calls after execution
-        return state.update(tool_calls=None, done=False, stop_reason=None)
+                # memory: store only text view
+                current = current.add_memory("tool", f"{result_prefix}: {c.name}: {_as_text(r)}")
+
+                # tools: preserve full result, always list
+                new_tools = dict(current.tools)
+                _append_tool_result(new_tools, c.name, r)
+                current = current.update(tools=new_tools)
+
+            except Exception as e:
+                current = current.add_memory("tool", f"{error_prefix}: {c.name}: {str(e)}")
+                new_tools = dict(current.tools)
+                _append_tool_result(new_tools, c.name, {"error": str(e)})
+                current = current.update(tools=new_tools)
+
+        # clear tool calls after execution
+        return current.update(tool_calls=None, done=False, stop_reason=None)
 
     return Flow(run, name="call_tools")
 
