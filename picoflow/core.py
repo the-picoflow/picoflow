@@ -6,6 +6,7 @@ from enum import Enum, auto
 import time
 import inspect
 import asyncio
+import warnings
 from .adapters.types import LLMAdapter
 from .adapters.registry import from_url
 
@@ -117,9 +118,23 @@ Ctx = State
 def pipe(*flows: Flow) -> Flow:
     async def run(state: State) -> State:
         current = state
-        for f in flows:
+        n = len(flows)
+
+        for i, f in enumerate(flows):
             check_timeout(current)
+
+            # Early stop BEFORE executing this step
             if current.done:
+                if current.stop_reason == "final" and i < n:
+                    warnings.warn(
+                        f"Early final detected before step {i+1}/{n} "
+                        f"('{getattr(f, 'name', 'unknown')}'). "
+                        f"'final' is reserved for the last step of a pipeline. "
+                        f"If this is intentional, use a different stop_reason "
+                        f"(e.g. 'route', 'guard', 'error').",
+                        RuntimeWarning,
+                        stacklevel=2,
+                    )
                 return current
 
             if current.branches is not None and not isinstance(f, MergeFlow):
@@ -131,13 +146,27 @@ def pipe(*flows: Flow) -> Flow:
             current = await f.acall(current)
             check_timeout(current)
 
+            # Early stop AFTER executing this step
             if current.done:
+                if current.stop_reason == "final" and i < n - 1:
+                    next_step = flows[i + 1]
+                    warnings.warn(
+                        f"Early final detected at step {i+1}/{n} "
+                        f"('{getattr(f, 'name', 'unknown')}'), "
+                        f"but remaining steps exist (next: '{getattr(next_step, 'name', 'unknown')}'). "
+                        f"'final' is reserved for the last step of a pipeline. "
+                        f"If this is intentional, use a different stop_reason "
+                        f"(e.g. 'route', 'guard', 'error').",
+                        RuntimeWarning,
+                        stacklevel=2,
+                    )
                 return current
 
         return current
 
     run.__flows__ = flows
     return Flow(run, name="pipe")
+
 
 
 def fork(*flows: Flow) -> Flow:
@@ -306,7 +335,7 @@ def llm(
         prompt_template: str = "{input}",
         stream: bool = False,
         llm_adapter: Optional[Union[str, LLMAdapter]] = None,
-        final: bool = True,
+        final: bool = False,
 ) -> Flow:
     def default_adapter(prompt: str, _stream: bool):
         if _stream:
