@@ -1,6 +1,6 @@
 from typing import Callable, Union, Awaitable, AsyncGenerator, Generator
 
-LLMAdapter = Callable[[str, bool], Union[
+LLMAdapter = Callable[..., Union[
     str,
     Awaitable[str],
     Generator[str, None, None],

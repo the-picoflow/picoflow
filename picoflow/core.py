@@ -400,6 +400,26 @@ def llm(
     else:
         adapter = llm_adapter or default_adapter
 
+    def _supports_auto_messages() -> bool:
+        return prompt_template.strip() == "{input}"
+
+    def _build_messages(state: State) -> Optional[List[Dict[str, Any]]]:
+        if not _supports_auto_messages():
+            return None
+
+        messages: List[Dict[str, Any]] = []
+        for item in state.memory:
+            role = item.get("role")
+            content = item.get("content")
+            if isinstance(role, str) and role and isinstance(content, str):
+                messages.append({"role": role, "content": content})
+
+        if isinstance(state.input, str) and state.input:
+            if not messages or messages[-1] != {"role": "user", "content": state.input}:
+                messages.append({"role": "user", "content": state.input})
+
+        return messages or None
+
     async def _to_async_iter(
             v: Union[
                 str,
@@ -470,7 +490,11 @@ def llm(
                 )
 
             chunks: List[str] = []
-            result = adapter(prompt, True)
+            messages = _build_messages(state)
+            try:
+                result = adapter(prompt, True, messages=messages) if messages is not None else adapter(prompt, True)
+            except TypeError:
+                result = adapter(prompt, True)
 
             async for c in _to_async_iter(result):
                 chunks.append(c)
@@ -482,7 +506,11 @@ def llm(
 
         # -------- non-streaming mode --------
         else:
-            result = adapter(prompt, False)
+            messages = _build_messages(state)
+            try:
+                result = adapter(prompt, False, messages=messages) if messages is not None else adapter(prompt, False)
+            except TypeError:
+                result = adapter(prompt, False)
 
             if inspect.isawaitable(result):
                 result = await result  # type: ignore[misc]

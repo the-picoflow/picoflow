@@ -6,7 +6,7 @@ import urllib.request
 import urllib.parse
 import urllib.error
 import asyncio
-from typing import Any, Dict, Optional, AsyncGenerator
+from typing import Any, Dict, Optional, AsyncGenerator, List
 
 from .types import LLMAdapter
 from .registry import register_llm_provider
@@ -23,13 +23,31 @@ def _maybe_float(v: Optional[str]) -> Optional[float]:
         raise ValueError(f"Invalid float: {v}")
 
 
-def _maybe_int(v: Optional[str]) -> Optional[int]:
-    if v is None or v == "":
-        return None
+def _parse_payload_value(v: str) -> Any:
     try:
-        return int(v)
-    except ValueError:
-        raise ValueError(f"Invalid int: {v}")
+        return json.loads(v)
+    except (TypeError, ValueError):
+        return v
+
+
+def _normalize_messages(prompt: str, messages: Optional[List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
+    if messages is None:
+        return [{"role": "user", "content": prompt}]
+
+    if not isinstance(messages, list):
+        raise ValueError("messages must be a list of message objects")
+
+    normalized: List[Dict[str, Any]] = []
+    for i, item in enumerate(messages):
+        if not isinstance(item, dict):
+            raise ValueError(f"messages[{i}] must be an object")
+        role = item.get("role")
+        if not isinstance(role, str) or not role:
+            raise ValueError(f"messages[{i}].role must be a non-empty string")
+        if "content" not in item:
+            raise ValueError(f"messages[{i}].content is required")
+        normalized.append(dict(item))
+    return normalized
 
 
 def _is_local_host(host: str) -> bool:
@@ -49,6 +67,19 @@ _PROVIDER_BASE_PATH = {
     "volces.com": "/api/v3",
     "volcengineapi.com": "/api/v3",
     "bytepluses.com": "/api/v3",
+}
+
+
+_RESERVED_QS_KEYS = {
+    "api_key",
+    "api_key_env",
+    "base_url",
+    "base_path",
+    "timeout",
+    "verify",
+    "insecure",
+    "ca_file",
+    "ca_path",
 }
 
 
@@ -89,10 +120,12 @@ def openai_compat_factory(u: urllib.parse.ParseResult, qs: Dict[str, str]) -> LL
     if api_key == "none":
         api_key = ""
 
-    temperature = _maybe_float(qs.get("temperature"))
-    top_p = _maybe_float(qs.get("top_p"))
-    max_tokens = _maybe_int(qs.get("max_tokens"))
     timeout = _maybe_float(qs.get("timeout"))
+    payload_params = {
+        k: _parse_payload_value(v)
+        for k, v in qs.items()
+        if k not in _RESERVED_QS_KEYS
+    }
 
     # TLS options from DSN ---
     # verify: default True. insecure=1 is shorthand for verify=False.
@@ -118,18 +151,13 @@ def openai_compat_factory(u: urllib.parse.ParseResult, qs: Dict[str, str]) -> LL
             h["Authorization"] = f"Bearer {api_key}"
         return h
 
-    def _body(prompt: str, stream: bool) -> Dict[str, Any]:
-        payload: Dict[str, Any] = {
+    def _body(prompt: str, stream: bool, messages: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
+        payload: Dict[str, Any] = dict(payload_params)
+        payload.update({
             "model": model,
-            "messages": [{"role": "user", "content": prompt}],
+            "messages": _normalize_messages(prompt, messages),
             "stream": stream,
-        }
-        if temperature is not None:
-            payload["temperature"] = temperature
-        if top_p is not None:
-            payload["top_p"] = top_p
-        if max_tokens is not None:
-            payload["max_tokens"] = max_tokens
+        })
         return payload
 
     async def _post_json(payload):
@@ -220,12 +248,12 @@ def openai_compat_factory(u: urllib.parse.ParseResult, qs: Dict[str, str]) -> LL
             except Exception:
                 pass
 
-    def adapter(prompt: str, stream: bool):
+    def adapter(prompt: str, stream: bool, *, messages: Optional[List[Dict[str, Any]]] = None):
         if stream:
-            return _post_stream(_body(prompt, True))
+            return _post_stream(_body(prompt, True, messages=messages))
 
         async def _one() -> str:
-            obj = await _post_json(_body(prompt, False))
+            obj = await _post_json(_body(prompt, False, messages=messages))
             try:
                 return obj["choices"][0]["message"]["content"]
             except Exception:

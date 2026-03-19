@@ -3,8 +3,11 @@ import inspect
 from picoflow import flow, Flow, State
 from picoflow.adapters import from_url
 
-DSN = os.environ.get("LLM_DSN",
-                     "llm+openai://ark.cn-beijing.volces.com/doubao-seed-1-8-251228?api_key_env=OPENAI_API_KEY&insecure=1")
+DSN = os.environ.get(
+    "LLM_DSN",
+    "llm+openai://ark.cn-beijing.volces.com/doubao-seed-1-8-251228"
+    '?api_key_env=OPENAI_API_KEY&timeout=300&insecure=1&thinking={"type":"disabled"}',
+)
 llm_adapter = from_url(DSN)
 
 
@@ -34,12 +37,14 @@ def remember_user(ctx):
 
 @flow
 async def ask_llm(ctx):
-    # build prompt inline (no helper)
-    prompt = "\n".join(
-        f"{m['role']}: {m['content']}" for m in ctx.metadata["messages"]
-    ) + "\nassistant:"
-
-    v = llm_adapter(prompt, False)  # stream=False
+    prompt = ctx.input
+    try:
+        v = llm_adapter(prompt, False, messages=ctx.metadata["messages"])
+    except TypeError:
+        fallback_prompt = "\n".join(
+            f"{m['role']}: {m['content']}" for m in ctx.metadata["messages"]
+        ) + "\nassistant:"
+        v = llm_adapter(fallback_prompt, False)
     out = await v if inspect.isawaitable(v) else v
     return ctx.update(output=out)
 

@@ -1,7 +1,7 @@
 from picoflow import flow, llm, create_agent
 
 # Connect model with LLM URL (API key from env: OPENAI_API_KEY)
-LLM_URL = "llm+openai://api.siliconflow.cn/deepseek-ai/DeepSeek-R1-0528-Qwen3-8B?api_key_env=OPENAI_API_KEY"
+LLM_URL = "llm+openai://api.siliconflow.cn/deepseek-ai/DeepSeek-R1-0528-Qwen3-8B?api_key_env=OPENAI_API_KEY&insecure=1"
 
 @flow
 async def mem(ctx):

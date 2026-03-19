@@ -19,7 +19,7 @@ LLMs, tools, loops, and branches compose naturally.**
 ```python
 from picoflow import flow, llm, create_agent
 
-LLM_URL = "llm+openai://api.openai.com/v1/chat/completions?model=gpt-4.1-mini&api_key_env=OPENAI_API_KEY&insecure=1"
+LLM_URL = "llm+openai:///gpt-4.1-mini?api_key_env=OPENAI_API_KEY"
 
 @flow
 async def mem(ctx):
@@ -143,8 +143,7 @@ flow = fork(a, b) >> merge(
 from picoflow.adapters.registry import from_url
 
 adapter = from_url(
-    "llm+openai://api.openai.com/v1/chat/completions"
-    "?model=gpt-4.1-mini&api_key_env=OPENAI_API_KEY&insecure=1"
+    "llm+openai:///gpt-4.1-mini?api_key_env=OPENAI_API_KEY"
 )
 ```
 
@@ -173,6 +172,59 @@ Use:
 ```
 llm+myllm://host/model?param=value
 ```
+
+### OpenAI-Compatible DSN Notes
+
+The OpenAI-compatible adapter uses this shape:
+
+```text
+llm+openai://<host>/<model>?k=v&...
+```
+
+Examples:
+
+```text
+llm+openai:///gpt-4.1-mini?api_key_env=OPENAI_API_KEY
+llm+openai://ark.cn-beijing.volces.com/doubao-seed-1-8-251228?api_key_env=OPENAI_API_KEY
+llm+openai://127.0.0.1:8000/Qwen2.5?api_key=none
+```
+
+Supported standard query params include:
+
+- `api_key`
+- `api_key_env`
+- `base_url`
+- `base_path`
+- `timeout`
+- `verify`
+- `insecure`
+- `ca_file`
+- `ca_path`
+
+All other query params are passed through to the request payload
+automatically.
+
+Example: Doubao `thinking`
+
+```text
+llm+openai://ark.cn-beijing.volces.com/doubao-seed-1-8-251228?api_key_env=OPENAI_API_KEY&thinking={"type":"enabled"}
+```
+
+Example: OpenAI-compatible reasoning parameter
+
+```text
+llm+openai:///gpt-5.1?api_key_env=OPENAI_API_KEY&reasoning_effort=medium
+```
+
+Simple JSON values are parsed automatically:
+
+- JSON objects and arrays become dict/list
+- JSON numbers become int/float
+- `true` / `false` / `null` become boolean / `None`
+- other values stay as strings
+
+Core fields such as `model`, `messages`, and `stream` are still controlled by
+PicoFlow and are not taken from the query string.
 
 ---
 

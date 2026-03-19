@@ -36,12 +36,14 @@ def remember_user(ctx):
 
 @flow
 async def ask_llm(ctx):
-    prompt = "\n".join(
-        f"{m['role']}: {m['content']}" for m in ctx.metadata["messages"]
-    ) + "\nassistant:"
-
-    # stream=True: adapter returns AsyncGenerator[str] (or other iterable)
-    v = llm_adapter(prompt, True)
+    prompt = ctx.input
+    try:
+        v = llm_adapter(prompt, True, messages=ctx.metadata["messages"])
+    except TypeError:
+        fallback_prompt = "\n".join(
+            f"{m['role']}: {m['content']}" for m in ctx.metadata["messages"]
+        ) + "\nassistant:"
+        v = llm_adapter(fallback_prompt, True)
     if inspect.isawaitable(v):
         v = await v
 
