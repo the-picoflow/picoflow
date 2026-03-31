@@ -21,6 +21,7 @@ class ToolCall:
 class LLMResult:
     output: str = ""
     tool_calls: List[ToolCall] = field(default_factory=list)
+    assistant_message: Optional[Dict[str, Any]] = None
 
 
 class TraceEvent(str, Enum):
@@ -412,7 +413,7 @@ def llm(
             role = item.get("role")
             content = item.get("content")
             if isinstance(role, str) and role and isinstance(content, str):
-                messages.append({"role": role, "content": content})
+                messages.append(dict(item))
 
         if isinstance(state.input, str) and state.input:
             if not messages or messages[-1] != {"role": "user", "content": state.input}:
@@ -532,7 +533,14 @@ def llm(
 
         new_memory = state.memory
         if output:
-            new_memory = state.add_memory("assistant", output).memory
+            if isinstance(result, LLMResult) and isinstance(result.assistant_message, dict):
+                assistant_message = dict(result.assistant_message)
+                assistant_message.setdefault("role", "assistant")
+                assistant_message.setdefault("content", output)
+                assistant_message.setdefault("time", time.time())
+                new_memory = state.memory + [assistant_message]
+            else:
+                new_memory = state.add_memory("assistant", output).memory
 
         return state.update(
             output=output,
@@ -556,7 +564,17 @@ def wrap_timeout(flow: Flow) -> Flow:
 
     async def run_with_timeout(state: State) -> State:
         check_timeout(state)
-        result = await base_flow.acall(state)
+        deadline = state.metadata.get("deadline")
+        if deadline is None:
+            result = await base_flow.acall(state)
+        else:
+            remaining = float(deadline) - time.time()
+            if remaining <= 0:
+                raise TimeoutError("Agent execution timed out")
+            try:
+                result = await asyncio.wait_for(base_flow.acall(state), timeout=remaining)
+            except asyncio.TimeoutError:
+                raise TimeoutError("Agent execution timed out") from None
         check_timeout(result)
         return result
 

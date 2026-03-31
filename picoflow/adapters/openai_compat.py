@@ -10,7 +10,7 @@ from typing import Any, Dict, Optional, AsyncGenerator, List
 
 from .types import LLMAdapter
 from .registry import register_llm_provider
-from ._http import run_blocking, raise_http_error, raise_url_error
+from ._http import run_blocking, raise_http_error, raise_url_error, raise_timeout_error, is_timeout_error
 from ._http import TLSConfig, urlopen_with_tls
 
 
@@ -50,6 +50,24 @@ def _normalize_messages(prompt: str, messages: Optional[List[Dict[str, Any]]]) -
     return normalized
 
 
+def _response_to_result(obj: Dict[str, Any]) -> LLMResult:
+    from ..core import LLMResult
+
+    try:
+        message = obj["choices"][0]["message"]
+    except Exception:
+        return LLMResult(output=json.dumps(obj, ensure_ascii=False))
+
+    if not isinstance(message, dict):
+        return LLMResult(output=json.dumps(obj, ensure_ascii=False))
+
+    content = message.get("content")
+    if isinstance(content, str):
+        return LLMResult(output=content, assistant_message=message)
+
+    return LLMResult(output=json.dumps(obj, ensure_ascii=False), assistant_message=message)
+
+
 def _is_local_host(host: str) -> bool:
     return host in ("localhost", "127.0.0.1", "0.0.0.0") or host.startswith("127.")
 
@@ -67,6 +85,8 @@ _PROVIDER_BASE_PATH = {
     "volces.com": "/api/v3",
     "volcengineapi.com": "/api/v3",
     "bytepluses.com": "/api/v3",
+    # MiniMax OpenAI-compatible API
+    "api.minimaxi.com": "/v1",
 }
 
 
@@ -90,11 +110,21 @@ def _default_base_path(host: str) -> str:
     return "/v1"
 
 
+def _provider_name_from_url(u: urllib.parse.ParseResult) -> str:
+    scheme = u.scheme or ""
+    if scheme.startswith("llm+"):
+        provider = scheme.split("+", 1)[1].strip()
+        if provider:
+            return provider
+    return "openai"
+
+
 def openai_compat_factory(u: urllib.parse.ParseResult, qs: Dict[str, str]) -> LLMAdapter:
     model = (u.path or "").lstrip("/")
     if not model:
         raise ValueError("Model missing in DSN path, e.g. llm+openai://host/MODEL?....")
 
+    provider_name = _provider_name_from_url(u)
     host = u.netloc.strip()
     base_url = qs.get("base_url")
     if base_url:
@@ -103,11 +133,17 @@ def openai_compat_factory(u: urllib.parse.ParseResult, qs: Dict[str, str]) -> LL
         if host:
             if host == "api.openai.com":
                 base = "https://api.openai.com"
+            elif host == "api.minimaxi.com":
+                base = "https://api.minimaxi.com"
             else:
                 scheme = _default_scheme(host)
                 base = f"{scheme}://{host}"
         else:
-            base = "https://api.openai.com"
+            if provider_name == "minimax":
+                base = "https://api.minimaxi.com"
+                host = "api.minimaxi.com"
+            else:
+                base = "https://api.openai.com"
 
     base_path = qs.get("base_path", _default_base_path(host)).rstrip("/")
     endpoint = f"{base}{base_path}/chat/completions"
@@ -171,15 +207,29 @@ def openai_compat_factory(u: urllib.parse.ParseResult, qs: Dict[str, str]) -> LL
             except urllib.error.HTTPError as e:
                 raise_http_error(
                     e,
-                    provider="openai",
+                    provider=provider_name,
                     hint="Check API key, model name, and endpoint."
                 )
             except urllib.error.URLError as e:
+                if is_timeout_error(e):
+                    raise_timeout_error(
+                        e,
+                        provider=provider_name,
+                        hint="Increase DSN timeout or Agent timeout for slow models."
+                    )
                 raise_url_error(
                     e,
-                    provider="openai",
+                    provider=provider_name,
                     hint="Check network and base_url/host."
                 )
+            except Exception as e:
+                if is_timeout_error(e):
+                    raise_timeout_error(
+                        e,
+                        provider=provider_name,
+                        hint="Increase DSN timeout or Agent timeout for slow models."
+                    )
+                raise
 
         return await run_blocking(_do)
 
@@ -195,15 +245,29 @@ def openai_compat_factory(u: urllib.parse.ParseResult, qs: Dict[str, str]) -> LL
         except urllib.error.HTTPError as e:
             raise_http_error(
                 e,
-                provider="openai",
+                provider=provider_name,
                 hint="Check API key, model name, and endpoint."
             )
         except urllib.error.URLError as e:
+            if is_timeout_error(e):
+                raise_timeout_error(
+                    e,
+                    provider=provider_name,
+                    hint="Increase DSN timeout or Agent timeout for slow models."
+                )
             raise_url_error(
                 e,
-                provider="openai",
+                provider=provider_name,
                 hint="Check network and base_url/host."
             )
+        except Exception as e:
+            if is_timeout_error(e):
+                raise_timeout_error(
+                    e,
+                    provider=provider_name,
+                    hint="Increase DSN timeout or Agent timeout for slow models."
+                )
+            raise
 
         # ---- read stream (NEW: add except) ----
         try:
@@ -230,17 +294,29 @@ def openai_compat_factory(u: urllib.parse.ParseResult, qs: Dict[str, str]) -> LL
         except urllib.error.HTTPError as e:
             raise_http_error(
                 e,
-                provider="openai",
+                provider=provider_name,
                 hint="Stream interrupted; check API key/model/endpoint."
             )
         except urllib.error.URLError as e:
+            if is_timeout_error(e):
+                raise_timeout_error(
+                    e,
+                    provider=provider_name,
+                    hint="Increase DSN timeout or Agent timeout for slow models."
+                )
             raise_url_error(
                 e,
-                provider="openai",
+                provider=provider_name,
                 hint="Stream interrupted; check network and base_url/host."
             )
         except Exception as e:
-            raise RuntimeError(f"[openai] Stream interrupted: {e}") from None
+            if is_timeout_error(e):
+                raise_timeout_error(
+                    e,
+                    provider=provider_name,
+                    hint="Increase DSN timeout or Agent timeout for slow models."
+                )
+            raise RuntimeError(f"[{provider_name}] Stream interrupted: {e}") from None
 
         finally:
             try:
@@ -254,10 +330,7 @@ def openai_compat_factory(u: urllib.parse.ParseResult, qs: Dict[str, str]) -> LL
 
         async def _one() -> str:
             obj = await _post_json(_body(prompt, False, messages=messages))
-            try:
-                return obj["choices"][0]["message"]["content"]
-            except Exception:
-                return json.dumps(obj, ensure_ascii=False)
+            return _response_to_result(obj)
 
         return _one()
 
@@ -267,3 +340,4 @@ def openai_compat_factory(u: urllib.parse.ParseResult, qs: Dict[str, str]) -> LL
 # register aliases
 register_llm_provider("openai", openai_compat_factory)
 register_llm_provider("openai_compat", openai_compat_factory)
+register_llm_provider("minimax", openai_compat_factory)

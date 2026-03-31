@@ -9,7 +9,7 @@ from typing import Any, Dict, Optional, AsyncGenerator
 
 from .types import LLMAdapter
 from .registry import register_llm_provider
-from ._http import run_blocking, raise_http_error, raise_url_error
+from ._http import run_blocking, raise_http_error, raise_url_error, raise_timeout_error, is_timeout_error
 
 
 def _maybe_float(v: Optional[str]) -> Optional[float]:
@@ -97,11 +97,25 @@ def ollama_factory(u: urllib.parse.ParseResult, qs: Dict[str, str]) -> LLMAdapte
                     hint="Is Ollama running? Check host/port and model name."
                 )
             except urllib.error.URLError as e:
+                if is_timeout_error(e):
+                    raise_timeout_error(
+                        e,
+                        provider="ollama",
+                        hint="Increase DSN timeout or Agent timeout for slow models."
+                    )
                 raise_url_error(
                     e,
                     provider="ollama",
                     hint="Is Ollama running? Check host/port and model name."
                 )
+            except Exception as e:
+                if is_timeout_error(e):
+                    raise_timeout_error(
+                        e,
+                        provider="ollama",
+                        hint="Increase DSN timeout or Agent timeout for slow models."
+                    )
+                raise
 
         return await run_blocking(_do)
 
@@ -127,11 +141,25 @@ def ollama_factory(u: urllib.parse.ParseResult, qs: Dict[str, str]) -> LLMAdapte
                 hint="Is Ollama running? Check host/port and model name."
             )
         except urllib.error.URLError as e:
+            if is_timeout_error(e):
+                raise_timeout_error(
+                    e,
+                    provider="ollama",
+                    hint="Increase DSN timeout or Agent timeout for slow models."
+                )
             raise_url_error(
                 e,
                 provider="ollama",
                 hint="Is Ollama running? Check host/port and model name."
             )
+        except Exception as e:
+            if is_timeout_error(e):
+                raise_timeout_error(
+                    e,
+                    provider="ollama",
+                    hint="Increase DSN timeout or Agent timeout for slow models."
+                )
+            raise
 
         # ---- read stream ----
         try:
@@ -165,12 +193,24 @@ def ollama_factory(u: urllib.parse.ParseResult, qs: Dict[str, str]) -> LLMAdapte
                 hint="Stream interrupted; check Ollama status, host/port, and model name."
             )
         except urllib.error.URLError as e:
+            if is_timeout_error(e):
+                raise_timeout_error(
+                    e,
+                    provider="ollama",
+                    hint="Increase DSN timeout or Agent timeout for slow models."
+                )
             raise_url_error(
                 e,
                 provider="ollama",
                 hint="Stream interrupted; check Ollama status and network."
             )
         except Exception as e:
+            if is_timeout_error(e):
+                raise_timeout_error(
+                    e,
+                    provider="ollama",
+                    hint="Increase DSN timeout or Agent timeout for slow models."
+                )
             raise RuntimeError(f"[ollama] Stream interrupted: {e}") from None
 
         finally:

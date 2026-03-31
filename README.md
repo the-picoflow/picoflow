@@ -185,7 +185,9 @@ Examples:
 
 ```text
 llm+openai:///gpt-4.1-mini?api_key_env=OPENAI_API_KEY
+llm+minimax:///MiniMax-Text-01?api_key_env=MINIMAX_API_KEY
 llm+openai://ark.cn-beijing.volces.com/doubao-seed-1-8-251228?api_key_env=OPENAI_API_KEY
+llm+minimax://api.minimaxi.com/MiniMax-Text-01?api_key_env=MINIMAX_API_KEY
 llm+openai://127.0.0.1:8000/Qwen2.5?api_key=none
 ```
 
@@ -214,6 +216,12 @@ Example: OpenAI-compatible reasoning parameter
 
 ```text
 llm+openai:///gpt-5.1?api_key_env=OPENAI_API_KEY&reasoning_effort=medium
+```
+
+Example: MiniMax via the OpenAI-compatible adapter alias
+
+```text
+llm+minimax:///MiniMax-Text-01?api_key_env=MINIMAX_API_KEY
 ```
 
 Simple JSON values are parsed automatically:

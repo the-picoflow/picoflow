@@ -6,6 +6,7 @@ import asyncio
 from typing import Callable, TypeVar, Optional
 import os
 import ssl
+import socket
 from dataclasses import dataclass
 
 T = TypeVar("T")
@@ -128,3 +129,22 @@ def raise_url_error(e: urllib.error.URLError, *, provider: str, hint: str = "") 
     if hint:
         msg += f"\nHint: {hint}"
     raise RuntimeError(msg) from None
+
+
+def raise_timeout_error(e: BaseException, *, provider: str, hint: str = "") -> None:
+    reason = str(e) or e.__class__.__name__
+    msg = f"[{provider}] Request timed out: {reason}"
+    if hint:
+        msg += f"\nHint: {hint}"
+    raise RuntimeError(msg) from None
+
+
+def is_timeout_error(e: BaseException) -> bool:
+    if isinstance(e, (TimeoutError, socket.timeout, asyncio.TimeoutError)):
+        return True
+
+    if isinstance(e, urllib.error.URLError):
+        reason = getattr(e, "reason", None)
+        return isinstance(reason, (TimeoutError, socket.timeout, asyncio.TimeoutError))
+
+    return False
